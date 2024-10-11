@@ -1,40 +1,61 @@
-#include <Wire.h>                // Inclure la bibliothèque pour l'I2C
-#include <LiquidCrystal_I2C.h>   // Inclure la bibliothèque pour écran LCD I2C
-#include <WiFi.h>                // Inclure la bibliothèque pour gérer le Wi-Fi
-#include <WebServer.h>           // Inclure la bibliothèque pour le serveur Web
+/*
+Wifi
+Met en place une connexion wifi et permet de gérer l'état de la LED de la maison via un bouton sur une page web.
+*/
 
-// Remplacez par les informations de votre réseau
-const char* ssid = "Florian";          // Remplacez par votre SSID
-const char* password = "Nolan.Ammar15";  // Remplacez par votre mot de passe
+#include <Wire.h>                
+#include <LiquidCrystal_I2C.h>   
+#include <WiFi.h>                
+#include <WebServer.h>           
 
-// Créez une instance de l'écran LCD I2C (adresse par défaut 0x27 et écran 16x2)
+
+
+String header;
+String output12State = "off";
+unsigned long currentTime = millis();
+unsigned long previousTime = 0; 
+
+
+const long timeoutTime = 2000;
+
+
+
+const int output12 = 12;
+
+const char* ssid = "Florian";          
+const char* password = "Nolan.Ammar15";  
+
+
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-WebServer server(80); // Créer un serveur sur le port 80
+WiFiServer server(80); 
 
 void setup() {
-  // Initialiser l'écran LCD
-  lcd.init();
-  lcd.backlight();  // Allumer le rétroéclairage de l'écran
 
-  // Afficher un message pendant la connexion Wi-Fi
+  pinMode(output12, OUTPUT);
+  
+
+  digitalWrite(output12, LOW);
+ 
+  lcd.init();
+  lcd.backlight();  
   lcd.setCursor(0, 0);
   lcd.print("Connexion au");
   lcd.setCursor(0, 1);
   lcd.print("Wi-Fi...");
 
   // Démarrer la connexion Wi-Fi
-  WiFi.begin(ssid, password); // Correctement initialiser la connexion Wi-Fi
+  WiFi.begin(ssid, password); 
 
-  // Attendre la connexion
+  
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Tentative de");
   lcd.setCursor(0, 1);
   lcd.print("connexion...");
 
-  // Boucle jusqu'à ce que la connexion soit établie
-  int attempts = 0;  // Compteur de tentatives
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) { // Limiter à 20 tentatives
+  
+  int attempts = 0;  
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) { 
     delay(1000);
     lcd.setCursor(0, 1);
     lcd.print("Essai: ");
@@ -42,22 +63,18 @@ void setup() {
     attempts++;
   }
 
-  // Vérifier si connecté
   if (WiFi.status() == WL_CONNECTED) {
-    // Une fois connecté, afficher l'adresse IP sur le LCD
+    
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("WiFi Connecte!");
     Serial.println(WiFi.localIP());
 
-    // Obtenir et afficher l'adresse IP sur la 2e ligne du LCD
+    
     lcd.setCursor(0, 1);
     lcd.print(WiFi.localIP());
 
-    // Configurer le serveur pour répondre à la racine
-    server.on("/", []() {
-      server.send(200, "text/plain", "Hello from ESP32!"); // Réponse du serveur
-    });
+   
 
     // Démarrer le serveur
     server.begin();
@@ -70,24 +87,103 @@ void setup() {
   }
 }
 
+
+
 void loop() {
-  // Gérer les requêtes du serveur
-  server.handleClient();
+  
+  WiFiClient client = server.available();
 
-  // Ici, nous allons mettre à jour l'affichage toutes les 5 secondes
-  static unsigned long lastUpdate = 0;  // Pour garder la trace du dernier temps d'actualisation
-  unsigned long currentMillis = millis(); // Temps actuel
+  if (client) {                             
+    currentTime = millis();
+    previousTime = currentTime;
+    Serial.println("New Client.");          
+    String currentLine = "";                
+    while (client.connected() && currentTime - previousTime <= timeoutTime) {  
+      currentTime = millis();
+      if (client.available()) {             
+        char c = client.read();             
+        Serial.write(c);                    
+        header += c;
+        if (c == '\n') {                   
+         
+          if (currentLine.length() == 0) {
+            
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println("Connection: close");
+            client.println();
+            
+            
+            if (header.indexOf("GET /12/on") >= 0) {
+              Serial.println("GPIO 12 on");
+              output12State = "on";
+              digitalWrite(output12, HIGH);
+            } else if (header.indexOf("GET /12/off") >= 0) {
+              Serial.println("GPIO 12 off");
+              output12State = "off";
+              digitalWrite(output12, LOW);
+            } 
+            
+            
+            client.println("<!DOCTYPE html><html>");
+            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+            client.println("<link rel=\"icon\" href=\"data:,\">");
+            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
+            client.println(".button { background-color: #4CAF50; border: none; color: white; padding: 16px 40px;");
+            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
+            client.println(".button2 {background-color: #555555;}</style></head>");
+            
+           
+            client.println("<body><h1>ESP32 Web Server</h1>");
+            
+            
+            client.println("<p>LED Jaune - State " + output12State + "</p>");
+                   
+            if (output12State=="off") {
+              client.println("<p><a href=\"/12/on\"><button class=\"button\">ON</button></a></p>");
+            } else {
+              client.println("<p><a href=\"/12/off\"><button class=\"button button2\">OFF</button></a></p>");
+            } 
 
-  // Vérifiez si 5 secondes se sont écoulées
+            client.println();
+            
+            break;
+          } else { 
+            currentLine = "";
+          }
+        } else if (c != '\r') {  
+          currentLine += c;      
+        }
+      }
+    }
+    
+    header = "";
+
+    // Fermer la connexion
+    client.stop();
+    Serial.println("Client disconnected.");
+    Serial.println("");
+
+  }
+  
+
+
+
+
+  
+  static unsigned long lastUpdate = 0;  
+  unsigned long currentMillis = millis(); 
+
   if (currentMillis - lastUpdate >= 5000) {
-    lastUpdate = currentMillis; // Mettez à jour le dernier temps d'actualisation
+    lastUpdate = currentMillis; 
 
-    // Afficher à nouveau l'adresse IP
+    
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("WiFi Connecte!");
     lcd.setCursor(0, 1);
     Serial.println(WiFi.localIP());
-    lcd.print(WiFi.localIP()); // Réaffiche l'adresse IP
+    lcd.print(WiFi.localIP()); 
   }
 }
+
